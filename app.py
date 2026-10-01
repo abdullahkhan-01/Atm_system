@@ -1,305 +1,159 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-import sqlite3
-from datetime import datetime
+from flask import Flask, render_template, request, redirect, session, flash
 
 app = Flask(__name__)
-app.secret_key = "atm-project-secret-key"
-
-DATABASE = "atm.db"
+app.secret_key = "atm123"
 
 
-def get_db():
-    """Connect to the SQLite database."""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
+users = {
+    "10010001": {
+        "name": "Aarav Sharma",
+        "pin": "1234",
+        "balance": 25000,
+        "transactions": []
+    },
+    "10010002": {
+        "name": "Priya Patil",
+        "pin": "2345",
+        "balance": 18500,
+        "transactions": []
+    },
+    "10010003": {
+        "name": "Rohan Deshmukh",
+        "pin": "3456",
+        "balance": 42000,
+        "transactions": []
+    },
+    "10010004": {
+        "name": "Ananya Kulkarni",
+        "pin": "4567",
+        "balance": 12750,
+        "transactions": []
+    }
+}
 
 
-def setup_database():
-    """Create tables and add beginner-friendly sample Indian accounts."""
-    conn = get_db()
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            account_no TEXT UNIQUE NOT NULL,
-            pin TEXT NOT NULL,
-            balance REAL NOT NULL DEFAULT 0
-        )
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            transaction_type TEXT NOT NULL,
-            amount REAL NOT NULL,
-            description TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
-
-    # Sample data is inserted only when the database is empty.
-    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-
-    if count == 0:
-        sample_users = [
-            ("Aarav Sharma", "10010001", "1234", 25000),
-            ("Priya Patil", "10010002", "2345", 18500),
-            ("Rohan Deshmukh", "10010003", "3456", 42000),
-            ("Ananya Kulkarni", "10010004", "4567", 12750),
-        ]
-
-        conn.executemany(
-            "INSERT INTO users (name, account_no, pin, balance) VALUES (?, ?, ?, ?)",
-            sample_users
-        )
-
-    conn.commit()
-    conn.close()
-
-
-def add_transaction(user_id, transaction_type, amount, description):
-    """Save a transaction in the database."""
-    conn = get_db()
-    conn.execute(
-        """
-        INSERT INTO transactions
-        (user_id, transaction_type, amount, description, created_at)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            transaction_type,
-            amount,
-            description,
-            datetime.now().strftime("%d %b %Y, %I:%M %p"),
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-
-@app.route("/")
-def index():
-    if "user_id" in session:
-        return redirect(url_for("dashboard"))
-    return render_template("index.html")
-
-
-@app.route("/login", methods=["POST"])
+@app.route("/", methods=["GET", "POST"])
 def login():
-    account_no = request.form.get("account_no", "").strip()
-    pin = request.form.get("pin", "").strip()
 
-    conn = get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE account_no = ? AND pin = ?",
-        (account_no, pin),
-    ).fetchone()
-    conn.close()
+    if request.method == "POST":
 
-    if user:
-        session["user_id"] = user["id"]
-        return redirect(url_for("dashboard"))
+        account = request.form["account_no"]
+        pin = request.form["pin"]
 
-    flash("Invalid account number or PIN.", "error")
-    return redirect(url_for("index"))
+        if account in users and users[account]["pin"] == pin:
+
+            session["account"] = account
+            return redirect("/dashboard")
+
+        flash("Wrong account number or PIN.", "error")
+
+    return render_template("index.html")
 
 
 @app.route("/dashboard")
 def dashboard():
-    if "user_id" not in session:
-        return redirect(url_for("index"))
 
-    conn = get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE id = ?", (session["user_id"],)
-    ).fetchone()
+    if "account" not in session:
+        return redirect("/")
 
-    recent_transactions = conn.execute(
-        """
-        SELECT * FROM transactions
-        WHERE user_id = ?
-        ORDER BY id DESC
-        LIMIT 5
-        """,
-        (session["user_id"],),
-    ).fetchall()
-    conn.close()
+    user = users[session["account"]]
 
     return render_template(
         "dashboard.html",
         user=user,
-        transactions=recent_transactions
+        transactions=user["transactions"][:5]
     )
-
-
-@app.route("/withdraw", methods=["POST"])
-def withdraw():
-    if "user_id" not in session:
-        return redirect(url_for("index"))
-
-    try:
-        amount = float(request.form.get("amount", 0))
-    except ValueError:
-        amount = 0
-
-    if amount <= 0:
-        flash("Please enter a valid withdrawal amount.", "error")
-        return redirect(url_for("dashboard"))
-
-    if amount % 100 != 0:
-        flash("ATM accepts withdrawal amounts in multiples of ₹100.", "error")
-        return redirect(url_for("dashboard"))
-
-    conn = get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE id = ?", (session["user_id"],)
-    ).fetchone()
-
-    if amount > user["balance"]:
-        conn.close()
-        flash("Insufficient balance.", "error")
-        return redirect(url_for("dashboard"))
-
-    new_balance = user["balance"] - amount
-    conn.execute(
-        "UPDATE users SET balance = ? WHERE id = ?",
-        (new_balance, user["id"])
-    )
-    conn.commit()
-    conn.close()
-
-    add_transaction(
-        user["id"],
-        "Withdrawal",
-        amount,
-        "Cash withdrawal from ATM"
-    )
-
-    flash(f"₹{amount:,.2f} withdrawn successfully.", "success")
-    return redirect(url_for("dashboard"))
 
 
 @app.route("/deposit", methods=["POST"])
 def deposit():
-    if "user_id" not in session:
-        return redirect(url_for("index"))
 
-    try:
-        amount = float(request.form.get("amount", 0))
-    except ValueError:
-        amount = 0
+    user = users[session["account"]]
+    amount = float(request.form["amount"])
 
-    if amount <= 0:
-        flash("Please enter a valid deposit amount.", "error")
-        return redirect(url_for("dashboard"))
+    user["balance"] += amount
 
-    conn = get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE id = ?", (session["user_id"],)
-    ).fetchone()
+    user["transactions"].insert(0, {
+        "type": "Deposit",
+        "amount": amount,
+        "description": "Money deposited"
+    })
 
-    new_balance = user["balance"] + amount
-    conn.execute(
-        "UPDATE users SET balance = ? WHERE id = ?",
-        (new_balance, user["id"])
-    )
-    conn.commit()
-    conn.close()
+    flash("Money deposited successfully.", "success")
 
-    add_transaction(
-        user["id"],
-        "Deposit",
-        amount,
-        "Cash deposited into account"
-    )
+    return redirect("/dashboard")
 
-    flash(f"₹{amount:,.2f} deposited successfully.", "success")
-    return redirect(url_for("dashboard"))
+
+@app.route("/withdraw", methods=["POST"])
+def withdraw():
+
+    user = users[session["account"]]
+    amount = float(request.form["amount"])
+
+    if amount > user["balance"]:
+
+        flash("Insufficient balance.", "error")
+
+    else:
+
+        user["balance"] -= amount
+
+        user["transactions"].insert(0, {
+            "type": "Withdrawal",
+            "amount": amount,
+            "description": "Money withdrawn"
+        })
+
+        flash("Money withdrawn successfully.", "success")
+
+    return redirect("/dashboard")
 
 
 @app.route("/transfer", methods=["POST"])
 def transfer():
-    if "user_id" not in session:
-        return redirect(url_for("index"))
 
-    receiver_account = request.form.get("receiver_account", "").strip()
+    sender = users[session["account"]]
 
-    try:
-        amount = float(request.form.get("amount", 0))
-    except ValueError:
-        amount = 0
+    receiver_account = request.form["receiver_account"]
+    amount = float(request.form["amount"])
 
-    if amount <= 0:
-        flash("Please enter a valid transfer amount.", "error")
-        return redirect(url_for("dashboard"))
+    if receiver_account not in users:
 
-    conn = get_db()
-    sender = conn.execute(
-        "SELECT * FROM users WHERE id = ?", (session["user_id"],)
-    ).fetchone()
+        flash("Account not found.", "error")
 
-    receiver = conn.execute(
-        "SELECT * FROM users WHERE account_no = ?", (receiver_account,)
-    ).fetchone()
+    elif receiver_account == session["account"]:
 
-    if not receiver:
-        conn.close()
-        flash("Receiver account not found.", "error")
-        return redirect(url_for("dashboard"))
+        flash("You cannot transfer to yourself.", "error")
 
-    if receiver["id"] == sender["id"]:
-        conn.close()
-        flash("You cannot transfer money to your own account.", "error")
-        return redirect(url_for("dashboard"))
+    elif amount > sender["balance"]:
 
-    if amount > sender["balance"]:
-        conn.close()
-        flash("Insufficient balance for this transfer.", "error")
-        return redirect(url_for("dashboard"))
+        flash("Insufficient balance.", "error")
 
-    sender_balance = sender["balance"] - amount
-    receiver_balance = receiver["balance"] + amount
+    else:
 
-    conn.execute(
-        "UPDATE users SET balance = ? WHERE id = ?",
-        (sender_balance, sender["id"])
-    )
-    conn.execute(
-        "UPDATE users SET balance = ? WHERE id = ?",
-        (receiver_balance, receiver["id"])
-    )
-    conn.commit()
-    conn.close()
+        receiver = users[receiver_account]
 
-    add_transaction(
-        sender["id"],
-        "Transfer",
-        amount,
-        f"Transferred to {receiver['name']} ({receiver['account_no']})"
-    )
+        sender["balance"] -= amount
+        receiver["balance"] += amount
 
-    add_transaction(
-        receiver["id"],
-        "Received",
-        amount,
-        f"Received from {sender['name']} ({sender['account_no']})"
-    )
+        sender["transactions"].insert(0, {
+            "type": "Transfer",
+            "amount": amount,
+            "description": "Money transferred"
+        })
 
-    flash(f"₹{amount:,.2f} transferred successfully.", "success")
-    return redirect(url_for("dashboard"))
+        flash("Money transferred successfully.", "success")
+
+    return redirect("/dashboard")
 
 
 @app.route("/logout")
 def logout():
+
     session.clear()
-    return redirect(url_for("index"))
+
+    return redirect("/")
 
 
 if __name__ == "__main__":
-    setup_database()
     app.run(debug=True)
