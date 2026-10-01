@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATM System - Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="login-page">
+    <div class="login-card">
+
+        <div class="brand">
+            <div class="brand-icon">₹</div>
+            <div>
+                <h1>SecureATM</h1>
+                <p>Indian Banking System</p>
+            </div>
+        </div>
+
+        <div class="login-heading">
+            <h2>Welcome Back</h2>
+            <p>Login to access your ATM account.</p>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert {{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" class="login-form">
+
+            <label for="account_number">Account Number</label>
+            <input
+                type="text"
+                id="account_number"
+                name="account_number"
+                placeholder="Enter account
